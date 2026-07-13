@@ -3,6 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#0b1622">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="潛水迷霧">
 <title>台灣潛點迷霧地圖</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
@@ -29,8 +34,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
   border:1px solid var(--line);border-radius:14px;padding:6px 14px;text-align:center;cursor:pointer}
 #explorePill b{font-size:20px;color:var(--accent);font-variant-numeric:tabular-nums}
 #explorePill span{display:block;font-size:9px;color:var(--sub);letter-spacing:1px}
-#menuBtn{background:rgba(14,28,44,.88);border:1px solid var(--line);border-radius:14px;color:var(--text);
-  width:40px;height:40px;font-size:20px;cursor:pointer;flex:none}
+#menuBtn,#searchBtn{background:rgba(14,28,44,.88);border:1px solid var(--line);border-radius:14px;color:var(--text);
+  width:40px;height:40px;font-size:18px;cursor:pointer;flex:none}
 
 /* ── 模式切換（水肺/自潛）── */
 #modeSwitch{position:fixed;top:calc(66px + var(--sat));left:12px;z-index:1000;display:flex;gap:3px;
@@ -142,6 +147,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 .reg-progress .rp .bar{flex:1;height:8px;background:#14263a;border-radius:4px;overflow:hidden}
 .reg-progress .rp .bar i{display:block;height:100%;background:linear-gradient(90deg,#14b8a6,#38bdf8);border-radius:4px}
 .reg-progress .rp .ct{font-size:11px;color:var(--sub);width:46px;text-align:right;font-variant-numeric:tabular-nums}
+.srow{display:flex;align-items:center;gap:10px;padding:10px 4px;border-bottom:1px solid var(--line);cursor:pointer}
+.srow .ic{font-size:16px;width:24px;text-align:center;flex:none}
+.srow .nm{font-size:14px;font-weight:600}
+.srow .rg{font-size:11px;color:var(--sub);margin-top:1px}
+.srow .lvb{margin-left:auto;flex:none}
+.sgroup{margin-top:12px;font-size:12px;font-weight:700;color:var(--accent2)}
 .hint{font-size:12px;color:var(--sub);line-height:1.7;margin-top:10px}
 .leaflet-control-attribution{background:rgba(10,20,32,.7)!important;color:#5f7890!important;font-size:9px!important}
 .leaflet-control-attribution a{color:#7395ad!important}
@@ -155,6 +166,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 <div id="topbar">
   <div class="brand"><h1>🌊 台灣潛點迷霧地圖</h1><small id="subTitle">點亮你潛過的海</small></div>
   <div id="explorePill" onclick="openStats()"><b id="pct">0%</b><span>探索度</span></div>
+  <button id="searchBtn" onclick="openSearch()">🔍</button>
   <button id="menuBtn" onclick="openMenu()">☰</button>
 </div>
 
@@ -209,6 +221,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
       <div class="stat-box"><b id="st_sites">0</b><span>解鎖潛點</span></div>
       <div class="stat-box"><b id="st_dives">0</b><span>總潛水紀錄</span></div>
       <div class="stat-box"><b id="st_deep">–</b><span>最深紀錄 (m)</span></div>
+      <div class="stat-box"><b id="st_time">–</b><span id="st_time_lb">總潛水時數</span></div>
+      <div class="stat-box"><b id="st_fav" style="font-size:14px;line-height:30px">–</b><span>最常去的潛點</span></div>
     </div>
     <div class="reg-progress" id="regProg"></div>
     <div class="hint">迷霧會隨著你標記「已潛」的潛點一塊塊散開；區域內全部解鎖，那片海就完全點亮。</div>
@@ -237,6 +251,18 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
       擴充套件匯出 JSON，再從上面按鈕匯入（會進到目前選擇的模式）<br>
       ・所有紀錄與照片只存在這台裝置（localStorage + IndexedDB），換手機前記得先匯出備份
     </div>
+  </div>
+</div>
+
+<!-- 搜尋潛點 -->
+<div class="sheet" id="searchSheet">
+  <div class="grab"></div>
+  <div class="body">
+    <h2>🔍 搜尋潛點</h2>
+    <div class="fld" style="margin-top:10px">
+      <input type="search" id="searchInput" placeholder="輸入潛點名稱（中英文皆可）" oninput="renderSearch()">
+    </div>
+    <div id="searchList"></div>
   </div>
 </div>
 
@@ -423,6 +449,7 @@ function idb(){ return new Promise((res,rej)=>{ if(db) return res(db);
 async function photoPut(id,blob){ const d=await idb(); return new Promise((res,rej)=>{ const tx=d.transaction('photos','readwrite'); tx.objectStore('photos').put({id,blob}); tx.oncomplete=res; tx.onerror=()=>rej(tx.error); }); }
 async function photoGet(id){ const d=await idb(); return new Promise(res=>{ const rq=d.transaction('photos').objectStore('photos').get(id); rq.onsuccess=()=>res(rq.result?rq.result.blob:null); rq.onerror=()=>res(null); }); }
 async function photoDel(id){ const d=await idb(); const tx=d.transaction('photos','readwrite'); tx.objectStore('photos').delete(id); }
+async function photoClear(){ const d=await idb(); return new Promise(res=>{ const tx=d.transaction('photos','readwrite'); tx.objectStore('photos').clear(); tx.oncomplete=res; tx.onerror=res; }); }
 
 function allSites(){ return SITES_RAW.concat(store.custom).map(s=>({id:s[0],name:s[1],region:s[2],lat:s[3],lng:s[4],lv:s[5],type:s[6],depth:s[7],feat:s[8],custom:s[9]==='c'})); }
 function siteLogs(id){ return curLogs()[id]||[]; }
@@ -451,6 +478,7 @@ const Fog=L.Layer.extend({
     ctx.fillRect(0,0,sz.x,sz.y);
     ctx.fillStyle='rgba(24,42,60,0.35)';                  // 疊一層深灰讓霧有層次
     ctx.fillRect(0,0,sz.x,sz.y);
+    if(fogTex){ ctx.fillStyle=ctx.createPattern(fogTex,'repeat'); ctx.fillRect(0,0,sz.x,sz.y); }  // 雲霧紋理
     const z=m.getZoom(), mpp=40075016.686*Math.cos(23.5*Math.PI/180)/Math.pow(2,z+8);
     ctx.globalCompositeOperation='destination-out';
     for(const s of allSites()){
@@ -468,6 +496,14 @@ const Fog=L.Layer.extend({
     ctx.globalCompositeOperation='source-over'; }
 });
 const anim={site:null,f:0};
+const fogTex=(()=>{                                        // 預先產生一張雲霧噪點磚
+  const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d');
+  for(let i=0;i<300;i++){ const px=Math.random()*256, py=Math.random()*256, r=6+Math.random()*26;
+    const g=x.createRadialGradient(px,py,0,px,py,r);
+    const a=0.015+Math.random()*0.045;
+    g.addColorStop(0,`rgba(235,242,248,${a})`); g.addColorStop(1,'rgba(235,242,248,0)');
+    x.fillStyle=g; x.beginPath(); x.arc(px,py,r,0,7); x.fill(); }
+  return c; })();
 const fog=new Fog(); fog.addTo(map);
 function revealAnim(siteId){ anim.site=siteId; const t0=performance.now();
   (function step(t){ const k=Math.min((t-t0)/1500,1); anim.f=1-Math.pow(1-k,3); fog.redraw();
@@ -585,10 +621,13 @@ async function logCardHtml(lg){
     ${lg.note?`<div class="lc-note">${lg.note.replace(/</g,'&lt;')}</div>`:''}
     ${ph?`<div class="lc-photos">${ph}</div>`:''}</div>`;
 }
+let liveUrls=[];
 async function hydratePhotos(){
+  liveUrls.forEach(u=>URL.revokeObjectURL(u)); liveUrls=[];   // 回收上一次面板的照片記憶體
   for(const img of document.querySelectorAll('#siteBody img[data-pid]')){
     const blob=await photoGet(img.dataset.pid);
-    if(blob){ img.src=URL.createObjectURL(blob); img.onclick=()=>{ $('lbImg').src=img.src; $('lightbox').classList.add('show'); }; }
+    if(blob){ img.src=URL.createObjectURL(blob); liveUrls.push(img.src);
+      img.onclick=()=>{ $('lbImg').src=img.src; $('lightbox').classList.add('show'); }; }
   }
 }
 function delCustom(id){
@@ -665,11 +704,17 @@ async function saveLog(){
 /* ── 統計與選單 ── */
 function openStats(){
   const sites=allSites(), open=sites.filter(s=>isOpen(s.id));
-  let dives=0,deep=0;
-  for(const k in curLogs()) for(const lg of curLogs()[k]){ dives++; deep=Math.max(deep,parseFloat(lg.depth)||0); }
+  let dives=0,deep=0,mins=0,trips=0,fav='–',favN=0;
+  for(const k in curLogs()){ const arr=curLogs()[k];
+    if(arr.length>favN){ favN=arr.length; fav=(sites.find(s=>s.id===k)||{}).name||'–'; }
+    for(const lg of arr){ dives++; deep=Math.max(deep,parseFloat(lg.depth)||0);
+      mins+=parseFloat(lg.time)||0; trips+=parseFloat(lg.tanks)||0; } }
   document.querySelector('#statsSheet h2').textContent='📊 探索統計（'+MODES[store.mode].icon+MODES[store.mode].name+'）';
   $('st_pct').textContent=fmtPct()+'%'; $('st_sites').textContent=open.length+' / '+sites.length;
   $('st_dives').textContent=dives; $('st_deep').textContent=deep||'–';
+  if(store.mode==='free'){ $('st_time_lb').textContent='總下潛趟數'; $('st_time').textContent=trips||'–'; }
+  else{ $('st_time_lb').textContent='總潛水時數'; $('st_time').textContent=mins?(mins/60).toFixed(1)+'h':'–'; }
+  $('st_fav').textContent=favN?`${fav}（${favN}次）`:'–';
   const st=regionStats(); let html='';
   for(const k in REGIONS){ const v=st[k],p=v.total? v.open/v.total*100:0;
     html+=`<div class="rp"><span class="nm">${REGIONS[k].name}</span><div class="bar"><i style="width:${p}%"></i></div><span class="ct">${v.open}/${v.total}</span></div>`; }
@@ -677,6 +722,33 @@ function openStats(){
   openSheetEl('statsSheet');
 }
 function openMenu(){ openSheetEl('menuSheet'); }
+
+/* ── 搜尋潛點 ── */
+function openSearch(){ $('searchInput').value=''; renderSearch(); openSheetEl('searchSheet'); }
+function renderSearch(){
+  const q=normName($('searchInput').value);
+  let list=allSites();
+  if(q) list=list.filter(s=>normName(s.name).includes(q)||(SITE_ALIASES[s.id]||[]).some(a=>normName(a).includes(q)));
+  let html='';
+  for(const rk in REGIONS){
+    const rows=list.filter(s=>s.region===rk); if(!rows.length) continue;
+    const opened=rows.filter(s=>isOpen(s.id)).length;
+    html+=`<div class="sgroup">${REGIONS[rk].name}（${opened}/${rows.length}）</div>`;
+    for(const s of rows){ const open=isOpen(s.id);
+      html+=`<div class="srow" onclick="gotoSite('${s.id}')">
+        <span class="ic">${open?MODES[store.mode].icon:'🌫'}</span>
+        <span><div class="nm">${s.name}</div>
+          <div class="rg">${s.type}${s.depth?`・最深 ${s.depth}m`:''}${open?`・潛次 ${siteLogs(s.id).length}`:''}</div></span>
+        <span class="badge ${LV[s.lv][1]} lvb">${LV[s.lv][0]}</span></div>`; }
+  }
+  $('searchList').innerHTML=html||'<div class="hint" style="margin-top:14px">找不到符合的潛點——可以長按地圖任一位置新增自訂潛點</div>';
+}
+function gotoSite(id){
+  const s=allSites().find(x=>x.id===id); if(!s) return;
+  closeAllSheets();
+  map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),13),{duration:.8});
+  setTimeout(()=>openSite(id),850);
+}
 
 async function exportData(){
   toast('打包中…');
@@ -700,6 +772,7 @@ $('importFile').addEventListener('change',async e=>{
     store.logs = data.ver>=2 ? Object.assign({scuba:{},free:{}},data.logs||{})
                              : {scuba:data.logs||{}, free:{}};   // 舊版備份視為水肺
     store.custom=data.custom||[];
+    await photoClear();                                          // 清掉舊照片避免孤兒檔累積
     for(const pid in (data.photos||{})){
       const res=await fetch(data.photos[pid]); await photoPut(pid,await res.blob());
     }
@@ -833,10 +906,10 @@ function doPadiImport(){
   toast(added?`匯入 ${added} 筆完成 🎉${skipped?`（略過重複 ${skipped} 筆）`:''}`:'沒有匯入任何紀錄');
 }
 
-function resetAll(){
+async function resetAll(){
   if(!confirm('確定清除全部潛水紀錄、照片與自訂潛點？此動作無法復原！')) return;
   if(!confirm('真的確定嗎？建議先「匯出備份」再清除。')) return;
-  for(const m in store.logs) for(const k in store.logs[m]) for(const lg of store.logs[m][k]) (lg.photos||[]).forEach(photoDel);
+  await photoClear();
   store={mode:store.mode,logs:{scuba:{},free:{}},custom:[]}; persist(); refreshAll(); closeAllSheets(); toast('已重置');
 }
 
@@ -845,6 +918,8 @@ $('mBtnS').classList.toggle('on',store.mode==='scuba');
 $('mBtnF').classList.toggle('on',store.mode==='free');
 $('subTitle').textContent=MODES[store.mode].icon+' '+MODES[store.mode].name+'模式';
 refreshAll();
+if(!Object.keys(store.logs.scuba).length && !Object.keys(store.logs.free).length)
+  setTimeout(()=>toast('🌫 全台被海霧覆蓋中——點一個潛點開始探索！'),1200);
 </script>
 </body>
 </html>
