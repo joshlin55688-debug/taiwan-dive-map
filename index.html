@@ -153,6 +153,22 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 .srow .rg{font-size:11px;color:var(--sub);margin-top:1px}
 .srow .lvb{margin-left:auto;flex:none}
 .sgroup{margin-top:12px;font-size:12px;font-weight:700;color:var(--accent2)}
+.wishbtn{margin-left:auto;background:none;border:none;font-size:22px;cursor:pointer;flex:none;line-height:1}
+.mk-locked.wish{border-color:#fbbf24;color:#fbbf24}
+.seabox{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:10px 0 4px}
+.seabox .sb-t{font-size:12px;font-weight:700;display:flex;align-items:center;gap:6px}
+.seabox .sb-t small{color:var(--sub);font-weight:400;margin-left:auto;font-size:10px}
+.seadays{display:flex;gap:4px;margin-top:8px;overflow-x:auto}
+.seaday{flex:1;min-width:40px;background:#16283c;border-radius:9px;padding:6px 2px;text-align:center}
+.seaday .d1{font-size:10px;color:var(--sub)}
+.seaday .d2{width:9px;height:9px;border-radius:50%;margin:4px auto}
+.seaday .d3{font-size:10px;font-weight:700}
+.seaday .d4{font-size:9px;color:var(--sub)}
+.gearbox{background:var(--panel2);border:1px solid var(--line);border-radius:14px;padding:10px 12px;margin:6px 0 10px;
+  display:flex;align-items:center;gap:8px}
+.gearbox .gt{font-size:12px;font-weight:700;flex:none}
+.gearbox .gv{font-size:12px;color:var(--sub);flex:1;line-height:1.5}
+.wke{margin-left:6px;font-size:10px;font-weight:700}
 .hint{font-size:12px;color:var(--sub);line-height:1.7;margin-top:10px}
 .leaflet-control-attribution{background:rgba(10,20,32,.7)!important;color:#5f7890!important;font-size:9px!important}
 .leaflet-control-attribution a{color:#7395ad!important}
@@ -235,6 +251,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
   <div class="body">
     <h2>⚙️ 選單</h2>
     <div class="menu-list">
+      <button class="btn btn-ghost" onclick="shareImage()">📸 產生探索分享圖</button>
       <button class="btn btn-ghost" onclick="exportData()">📤 匯出備份（JSON）</button>
       <button class="btn btn-ghost" onclick="document.getElementById('importFile').click()">📥 匯入備份</button>
       <input type="file" id="importFile" accept=".json,application/json" style="display:none">
@@ -262,6 +279,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
     <div class="fld" style="margin-top:10px">
       <input type="search" id="searchInput" placeholder="輸入潛點名稱（中英文皆可）" oninput="renderSearch()">
     </div>
+    <div class="tagwrap" id="filterChips" style="margin-top:8px">
+      <span class="tg on" data-f="all" onclick="setFilter('all')">全部</span>
+      <span class="tg" data-f="open" onclick="setFilter('open')">已解鎖</span>
+      <span class="tg" data-f="locked" onclick="setFilter('locked')">未解鎖</span>
+      <span class="tg" data-f="wish" onclick="setFilter('wish')">⭐ 想去</span>
+    </div>
     <div id="searchList"></div>
   </div>
 </div>
@@ -270,6 +293,23 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 <div class="sheet" id="importSheet">
   <div class="grab"></div>
   <div class="body" id="importBody"></div>
+</div>
+
+<!-- 裝備備忘 -->
+<div class="sheet" id="gearSheet">
+  <div class="grab"></div>
+  <div class="body">
+    <h2 id="gearTitle">🎒 裝備備忘</h2>
+    <div class="form-grid">
+      <div class="fld"><label>配重</label><input type="text" id="g_weight" placeholder="例：4kg"></div>
+      <div class="fld"><label>防寒衣</label><input type="text" id="g_suit" placeholder="例：3mm 全身"></div>
+      <div class="fld wide"><label>其他備忘</label><input type="text" id="g_note" placeholder="例：帶手電筒、跟阿明借浮球"></div>
+    </div>
+    <div style="display:flex;gap:9px;margin-top:14px">
+      <button class="btn btn-ghost" onclick="closeSheet('gearSheet')">取消</button>
+      <button class="btn btn-main" onclick="saveGear()">儲存</button>
+    </div>
+  </div>
 </div>
 
 <div id="toast"></div>
@@ -422,12 +462,14 @@ const LV = {1:['入門','b-lv1'],2:['進階','b-lv2'],3:['技潛','b-lv3']};
 /* ══════════ 資料層 ══════════ */
 const LS_KEY='tdm_v2';
 const MODES={scuba:{name:'水肺',icon:'🤿'},free:{name:'自潛',icon:'🐬'}};
-let store = {mode:'scuba', logs:{scuba:{},free:{}}, custom:[]};
+let store = {mode:'scuba', logs:{scuba:{},free:{}}, custom:[], wish:[], gear:{scuba:{},free:{}}};
 // logs[mode]: {siteId:[{id,date,buddy,tanks,depth,time,temp,vis,tags,note,photos:[ids]}]}
+// wish: [siteId]；gear[mode]: {siteId:{weight,suit,note}}
 try{
   const raw=localStorage.getItem(LS_KEY);
   if(raw){ const o=JSON.parse(raw); store=Object.assign(store,o);
-    store.logs=Object.assign({scuba:{},free:{}},store.logs||{}); }
+    store.logs=Object.assign({scuba:{},free:{}},store.logs||{});
+    store.wish=store.wish||[]; store.gear=Object.assign({scuba:{},free:{}},store.gear||{}); }
   else{ const v1=localStorage.getItem('tdm_v1');      // 從單模式版本遷移，舊紀錄視為水肺
     if(v1){ const o=JSON.parse(v1); store.logs.scuba=o.logs||{}; store.custom=o.custom||[]; persist(); } }
 }catch(e){}
@@ -454,6 +496,13 @@ async function photoClear(){ const d=await idb(); return new Promise(res=>{ cons
 function allSites(){ return SITES_RAW.concat(store.custom).map(s=>({id:s[0],name:s[1],region:s[2],lat:s[3],lng:s[4],lv:s[5],type:s[6],depth:s[7],feat:s[8],custom:s[9]==='c'})); }
 function siteLogs(id){ return curLogs()[id]||[]; }
 function isOpen(id){ return siteLogs(id).length>0; }
+function isWish(id){ return store.wish.includes(id); }
+function toggleWish(id){
+  store.wish=isWish(id)? store.wish.filter(x=>x!==id) : [...store.wish,id];
+  persist(); buildMarkers();
+  const b=document.getElementById('wishBtn'); if(b) b.textContent=isWish(id)?'⭐':'☆';
+  toast(isWish(id)?'已加入願望清單 ⭐':'已從願望清單移除');
+}
 
 /* ══════════ 地圖 ══════════ */
 const map=L.map('map',{zoomControl:true,attributionControl:true,maxZoom:18,minZoom:7,
@@ -518,7 +567,7 @@ function buildMarkers(){
     const open=isOpen(s.id), n=siteLogs(s.id).length;
     const html=open
       ? `<div class="mk mk-open${store.mode==='free'?' free':''}${s.custom?' mk-custom':''}" style="width:26px;height:26px;position:relative">${MODES[store.mode].icon}${n>1?`<span class="cnt">${n}</span>`:''}</div>`
-      : `<div class="mk mk-locked${s.custom?' mk-custom':''}" style="width:22px;height:22px">?</div>`;
+      : `<div class="mk mk-locked${isWish(s.id)?' wish':''}${s.custom?' mk-custom':''}" style="width:22px;height:22px">${isWish(s.id)?'★':'?'}</div>`;
     const mk=L.marker([s.lat,s.lng],{icon:L.divIcon({html,className:'',iconSize:open?[26,26]:[22,22],iconAnchor:open?[13,13]:[11,11]})});
     if(open) mk.bindTooltip(s.name,{direction:'top',offset:[0,-12],className:'site-tip'});
     mk.on('click',()=>openSite(s.id));
@@ -592,19 +641,76 @@ let curSite=null;
 async function openSite(id){
   curSite=id; const s=allSites().find(x=>x.id===id); if(!s) return;
   const logs=siteLogs(id), open=logs.length>0;
-  let html=`<h2>${open?'🤿':'❓'} ${s.name}
+  const g=store.gear[store.mode][id];
+  const gearTxt=g&&(g.weight||g.suit||g.note)
+    ? [g.weight&&'配重 '+g.weight, g.suit&&'防寒 '+g.suit, g.note].filter(Boolean).join('・')
+    : '尚未設定（記住這個點的配重與裝備）';
+  let html=`<h2>${open?MODES[store.mode].icon:'❓'} ${s.name}
     <span class="badge b-reg">${REGIONS[s.region].name}</span>
     <span class="badge ${LV[s.lv][1]}">${LV[s.lv][0]}</span>
-    <span class="badge b-ty">${s.type}</span></h2>
+    <span class="badge b-ty">${s.type}</span>
+    <button class="wishbtn" id="wishBtn" onclick="toggleWish('${id}')">${isWish(id)?'⭐':'☆'}</button></h2>
     <div class="meta-row">${s.depth?`<div>最大深度 <b>${s.depth}m</b></div>`:''}<div>潛次 <b>${logs.length}</b></div></div>
     <div class="feat">${s.feat||''}</div>
+    <div class="seabox" id="seaBox">
+      <div class="sb-t">🌊 七日海況 <small>Open-Meteo</small></div>
+      <div class="hint" style="margin-top:6px">載入中…</div>
+    </div>
+    <div class="gearbox"><span class="gt">🎒</span><span class="gv">${gearTxt}</span>
+      <button class="btn btn-ghost btn-sm" onclick="openGear()">編輯</button></div>
     <button class="btn btn-main" onclick="openLogForm()">${open?'＋ 新增一筆潛水紀錄':'🌫 標記已潛，散開迷霧'}</button>`;
   if(s.custom) html+=`<div style="margin-top:8px"><button class="btn btn-danger btn-sm" onclick="delCustom('${id}')">刪除這個自訂潛點</button></div>`;
   if(logs.length) html+=`<div style="margin-top:14px;font-size:13px;color:var(--sub);font-weight:700">潛水日誌（${logs.length}）</div>`;
   for(const lg of [...logs].reverse()) html+=await logCardHtml(lg);
   $('siteBody').innerHTML=html;
-  await hydratePhotos();
   openSheetEl('siteSheet');
+  renderSea(s);
+  await hydratePhotos();
+}
+
+/* ── 海況預報（Open-Meteo，免金鑰，快取 6 小時）── */
+async function fetchSea(site){
+  const key='sea_'+site.id;
+  try{ const c=JSON.parse(localStorage.getItem(key)||'null');
+    if(c && Date.now()-c.t<6*3600e3) return c.d; }catch(e){}
+  const q=`latitude=${site.lat}&longitude=${site.lng}&timezone=Asia%2FTaipei&forecast_days=7`;
+  const [mr,wr]=await Promise.all([
+    fetch(`https://marine-api.open-meteo.com/v1/marine?${q}&daily=wave_height_max,swell_wave_height_max&hourly=sea_surface_temperature`).then(r=>r.json()),
+    fetch(`https://api.open-meteo.com/v1/forecast?${q}&daily=wind_speed_10m_max,precipitation_probability_max`).then(r=>r.json()),
+  ]);
+  const d={ sst: mr.hourly?.sea_surface_temperature?.[12] ?? null,
+    days:(mr.daily?.time||[]).map((t,i)=>({date:t,
+      wave:mr.daily.wave_height_max?.[i], swell:mr.daily.swell_wave_height_max?.[i],
+      wind:wr.daily?.wind_speed_10m_max?.[i], rain:wr.daily?.precipitation_probability_max?.[i]})) };
+  if(!d.days.length) throw new Error('empty');
+  try{ localStorage.setItem(key,JSON.stringify({t:Date.now(),d})); }catch(e){}
+  return d;
+}
+function seaLight(day){                       // 岸潛觀點的紅黃綠燈
+  if(day.wave==null) return ['#64748b','—'];
+  if(day.wave<=0.8 && (day.wind??0)<=30) return ['#34d399','適合'];
+  if(day.wave<=1.5) return ['#fbbf24','注意'];
+  return ['#f87171','不宜'];
+}
+const WD=['日','一','二','三','四','五','六'];
+async function renderSea(s){
+  const box=$('seaBox'); if(!box) return;
+  try{
+    const d=await fetchSea(s);
+    const el=document.getElementById('seaBox'); if(!el||curSite!==s.id) return;
+    const days=d.days.map((day,i)=>{ const [c,txt]=seaLight(day);
+      const w=new Date(day.date+'T00:00');
+      return `<div class="seaday"><div class="d1">${i===0?'今天':'週'+WD[w.getDay()]}</div>
+        <div class="d2" style="background:${c}"></div>
+        <div class="d3">${day.wave!=null?day.wave.toFixed(1)+'m':'—'}</div>
+        <div class="d4">${day.wind!=null?Math.round(day.wind)+'k':''}</div></div>`; }).join('');
+    el.innerHTML=`<div class="sb-t">🌊 七日海況（浪高/風速）
+      <small>${d.sst!=null?'水溫 '+Math.round(d.sst)+'°C・':''}Open-Meteo</small></div>
+      <div class="seadays">${days}</div>`;
+  }catch(e){
+    const el=document.getElementById('seaBox');
+    if(el) el.querySelector('.hint').textContent='海況暫時無法取得（離線或服務忙碌）';
+  }
 }
 async function logCardHtml(lg){
   const free=store.mode==='free';
@@ -633,6 +739,8 @@ async function hydratePhotos(){
 function delCustom(id){
   if(!confirm('確定刪除這個自訂潛點？其日誌（含水肺與自潛）也會一併刪除')) return;
   for(const m in store.logs){ (store.logs[m][id]||[]).forEach(lg=>(lg.photos||[]).forEach(photoDel)); delete store.logs[m][id]; }
+  for(const m in store.gear) delete store.gear[m][id];
+  store.wish=store.wish.filter(x=>x!==id);
   store.custom=store.custom.filter(s=>s[0]!==id);
   persist(); refreshAll(); closeAllSheets(); toast('已刪除');
 }
@@ -724,11 +832,18 @@ function openStats(){
 function openMenu(){ openSheetEl('menuSheet'); }
 
 /* ── 搜尋潛點 ── */
+let searchFilter='all';
+function setFilter(f){ searchFilter=f;
+  document.querySelectorAll('#filterChips .tg').forEach(t=>t.classList.toggle('on',t.dataset.f===f));
+  renderSearch(); }
 function openSearch(){ $('searchInput').value=''; renderSearch(); openSheetEl('searchSheet'); }
 function renderSearch(){
   const q=normName($('searchInput').value);
   let list=allSites();
   if(q) list=list.filter(s=>normName(s.name).includes(q)||(SITE_ALIASES[s.id]||[]).some(a=>normName(a).includes(q)));
+  if(searchFilter==='open') list=list.filter(s=>isOpen(s.id));
+  else if(searchFilter==='locked') list=list.filter(s=>!isOpen(s.id));
+  else if(searchFilter==='wish') list=list.filter(s=>isWish(s.id));
   let html='';
   for(const rk in REGIONS){
     const rows=list.filter(s=>s.region===rk); if(!rows.length) continue;
@@ -736,18 +851,98 @@ function renderSearch(){
     html+=`<div class="sgroup">${REGIONS[rk].name}（${opened}/${rows.length}）</div>`;
     for(const s of rows){ const open=isOpen(s.id);
       html+=`<div class="srow" onclick="gotoSite('${s.id}')">
-        <span class="ic">${open?MODES[store.mode].icon:'🌫'}</span>
-        <span><div class="nm">${s.name}</div>
+        <span class="ic">${open?MODES[store.mode].icon:(isWish(s.id)?'⭐':'🌫')}</span>
+        <span><div class="nm">${s.name}${searchFilter==='wish'?`<span class="wke" data-sid="${s.id}"></span>`:''}</div>
           <div class="rg">${s.type}${s.depth?`・最深 ${s.depth}m`:''}${open?`・潛次 ${siteLogs(s.id).length}`:''}</div></span>
         <span class="badge ${LV[s.lv][1]} lvb">${LV[s.lv][0]}</span></div>`; }
   }
-  $('searchList').innerHTML=html||'<div class="hint" style="margin-top:14px">找不到符合的潛點——可以長按地圖任一位置新增自訂潛點</div>';
+  $('searchList').innerHTML=html||`<div class="hint" style="margin-top:14px">${searchFilter==='wish'?'還沒有想去的潛點——打開潛點按 ☆ 加入願望清單':'找不到符合的潛點——可以長按地圖任一位置新增自訂潛點'}</div>`;
+  if(searchFilter==='wish') fillWeekendLights();
+}
+async function fillWeekendLights(){        // 願望清單顯示本週末海況燈
+  for(const el of document.querySelectorAll('#searchList .wke')){
+    const s=allSites().find(x=>x.id===el.dataset.sid); if(!s) continue;
+    try{
+      const d=await fetchSea(s);
+      const wk=d.days.filter(day=>[0,6].includes(new Date(day.date+'T00:00').getDay())).slice(0,2);
+      if(!wk.length) continue;
+      const worst=wk.reduce((a,b)=>(a.wave??9)>(b.wave??9)?a:b);
+      const [c,txt]=seaLight(worst);
+      el.innerHTML=`<span style="color:${c}">● 週末${txt} ${worst.wave!=null?worst.wave.toFixed(1)+'m':''}</span>`;
+    }catch(e){}
+  }
 }
 function gotoSite(id){
   const s=allSites().find(x=>x.id===id); if(!s) return;
   closeAllSheets();
   map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),13),{duration:.8});
   setTimeout(()=>openSite(id),850);
+}
+
+/* ── 裝備備忘 ── */
+function openGear(){
+  const s=allSites().find(x=>x.id===curSite); if(!s) return;
+  const g=store.gear[store.mode][curSite]||{};
+  $('g_weight').value=g.weight||''; $('g_suit').value=g.suit||''; $('g_note').value=g.note||'';
+  $('gearTitle').textContent=`🎒 ${MODES[store.mode].name}裝備備忘：${s.name}`;
+  openSheetEl('gearSheet');
+}
+function saveGear(){
+  const g={weight:$('g_weight').value.trim(),suit:$('g_suit').value.trim(),note:$('g_note').value.trim()};
+  if(g.weight||g.suit||g.note) store.gear[store.mode][curSite]=g;
+  else delete store.gear[store.mode][curSite];
+  persist(); closeSheet('gearSheet'); openSite(curSite); toast('已儲存裝備備忘');
+}
+
+/* ── 探索分享圖 ── */
+async function shareImage(){
+  toast('產生分享圖中…');
+  const W=1080,H=1350,c=document.createElement('canvas'); c.width=W; c.height=H;
+  const x=c.getContext('2d');
+  const bg=x.createLinearGradient(0,0,0,H); bg.addColorStop(0,'#0b1622'); bg.addColorStop(1,'#0d2438');
+  x.fillStyle=bg; x.fillRect(0,0,W,H);
+  // 標題
+  x.fillStyle='#e8f1f8'; x.font='700 56px "PingFang TC","Noto Sans TC",sans-serif'; x.textAlign='center';
+  x.fillText('🌊 台灣潛點迷霧地圖',W/2,110);
+  x.fillStyle='#8fa8bd'; x.font='400 34px sans-serif';
+  x.fillText(`${MODES[store.mode].icon} ${MODES[store.mode].name}探索紀錄`,W/2,170);
+  // 台灣點陣圖（等距投影）
+  const LA1=21.45,LA2=25.55,LO1=118.9,LO2=122.45, mx=90,my=230,mw=W-180,mh=680;
+  const px=lng=>mx+(lng-LO1)/(LO2-LO1)*mw, py=lat=>my+(LA2-lat)/(LA2-LA1)*mh;
+  for(const s of allSites()){
+    const X=px(s.lng),Y=py(s.lat);
+    if(isOpen(s.id)){
+      x.shadowColor=store.mode==='free'?'#6366f1':'#2dd4bf'; x.shadowBlur=22;
+      x.fillStyle=store.mode==='free'?'#93c5fd':'#5eead4';
+      x.beginPath(); x.arc(X,Y,11,0,7); x.fill(); x.shadowBlur=0;
+    }else{
+      x.fillStyle=isWish(s.id)?'rgba(251,191,36,.75)':'rgba(78,104,128,.5)';
+      x.beginPath(); x.arc(X,Y,6,0,7); x.fill();
+    }
+  }
+  // 大探索度
+  x.fillStyle=store.mode==='free'?'#93c5fd':'#2dd4bf'; x.font='800 150px sans-serif';
+  x.fillText(fmtPct()+'%',W/2,1035);
+  x.fillStyle='#8fa8bd'; x.font='400 32px sans-serif'; x.fillText('全台探索度',W/2,1085);
+  // 統計列
+  const sites=allSites(), open=sites.filter(s=>isOpen(s.id)).length;
+  let dives=0,deep=0;
+  for(const k in curLogs()) for(const lg of curLogs()[k]){ dives++; deep=Math.max(deep,parseFloat(lg.depth)||0); }
+  const stats=[[open+'/'+sites.length,'解鎖潛點'],[dives,'潛水紀錄'],[deep?deep+'m':'—','最深紀錄']];
+  stats.forEach((st,i)=>{ const cx=W/6+(i*W/3);
+    x.fillStyle='#e8f1f8'; x.font='700 58px sans-serif'; x.fillText(String(st[0]),cx,1190);
+    x.fillStyle='#8fa8bd'; x.font='400 28px sans-serif'; x.fillText(st[1],cx,1235); });
+  x.fillStyle='#5f7890'; x.font='400 26px sans-serif';
+  x.fillText(new Date().toLocaleDateString('zh-TW')+'・點亮你潛過的海',W/2,1305);
+  // 輸出：優先系統分享，其次燈箱長按儲存
+  const blob=await new Promise(r=>c.toBlob(r,'image/png'));
+  const file=new File([blob],'dive-fog-map.png',{type:'image/png'});
+  if(navigator.canShare && navigator.canShare({files:[file]})){
+    try{ await navigator.share({files:[file],title:'台灣潛點迷霧地圖'}); return; }catch(e){}
+  }
+  const url=URL.createObjectURL(blob);
+  $('lbImg').src=url; $('lightbox').classList.add('show');
+  toast('長按圖片即可儲存 📸');
 }
 
 async function exportData(){
@@ -757,7 +952,7 @@ async function exportData(){
     const blob=await photoGet(pid); if(!blob) continue;
     photos[pid]=await new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); });
   }
-  const payload={app:'taiwan-dive-map',ver:2,exportedAt:new Date().toISOString(),logs:store.logs,custom:store.custom,photos};
+  const payload={app:'taiwan-dive-map',ver:3,exportedAt:new Date().toISOString(),logs:store.logs,custom:store.custom,wish:store.wish,gear:store.gear,photos};
   const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='dive-map-backup-'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'.json';
@@ -772,6 +967,7 @@ $('importFile').addEventListener('change',async e=>{
     store.logs = data.ver>=2 ? Object.assign({scuba:{},free:{}},data.logs||{})
                              : {scuba:data.logs||{}, free:{}};   // 舊版備份視為水肺
     store.custom=data.custom||[];
+    store.wish=data.wish||[]; store.gear=Object.assign({scuba:{},free:{}},data.gear||{});
     await photoClear();                                          // 清掉舊照片避免孤兒檔累積
     for(const pid in (data.photos||{})){
       const res=await fetch(data.photos[pid]); await photoPut(pid,await res.blob());
@@ -910,7 +1106,8 @@ async function resetAll(){
   if(!confirm('確定清除全部潛水紀錄、照片與自訂潛點？此動作無法復原！')) return;
   if(!confirm('真的確定嗎？建議先「匯出備份」再清除。')) return;
   await photoClear();
-  store={mode:store.mode,logs:{scuba:{},free:{}},custom:[]}; persist(); refreshAll(); closeAllSheets(); toast('已重置');
+  store={mode:store.mode,logs:{scuba:{},free:{}},custom:[],wish:[],gear:{scuba:{},free:{}}};
+  persist(); refreshAll(); closeAllSheets(); toast('已重置');
 }
 
 /* ── init ── */
