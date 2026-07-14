@@ -1264,7 +1264,13 @@ async function installApp(){
   try{ await deferredPrompt.userChoice; }catch(e){}
   deferredPrompt=null; $('installBtn').style.display='none';
 }
-if(isStandalone()){ const h=$('installHint'); if(h) h.innerHTML='・✓ <b>已安裝為 App</b>，資料只存在這台裝置，換手機前記得先匯出備份<br>'; }
+function inAppBrowser(){ return /Line\/|FBAN|FBAV|Instagram|Messenger|MicroMessenger|; wv\)/i.test(navigator.userAgent||''); }
+if(isStandalone()){
+  const h=$('installHint'); if(h) h.innerHTML='・✓ <b>已安裝為 App</b>，資料只存在這台裝置，換手機前記得先匯出備份<br>';
+}else if(inAppBrowser()){
+  const h=$('installHint'); if(h) h.innerHTML='・⚠️ <b>你正用 App 內建瀏覽器（LINE／FB 等）開啟，無法安裝</b>。請點右上角 <b>⋮ →「用其他瀏覽器開啟」</b>改用 Chrome（iPhone 用 Safari），才能加入主畫面<br>';
+  setTimeout(()=>toast('⚠️ 內建瀏覽器無法安裝，請改用 Chrome / Safari 開啟'),1600);
+}
 
 /* ── 啟動畫面：載入完成後淡出 ── */
 window.addEventListener('load',()=>setTimeout(()=>{
