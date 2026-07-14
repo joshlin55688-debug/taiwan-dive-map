@@ -2,7 +2,7 @@
    - App 本體（同源檔案）：cache-first，離線也開得起來
    - Leaflet／地圖圖磚（unpkg、CARTO）：cache-first，去過的區域離線可看
    - 海況 API（open-meteo）：不攔截，交給網路＋App 內建的 localStorage 快取 */
-const CACHE = 'tdm-cache-v1';
+const CACHE = 'tdm-cache-v2';
 const SHELL = ['./', './index.html', './manifest.json'];
 
 self.addEventListener('install', e => {
@@ -29,7 +29,8 @@ self.addEventListener('fetch', e => {
   const cacheable =
     url.origin === self.location.origin ||
     url.hostname === 'unpkg.com' ||
-    url.hostname.endsWith('basemaps.cartocdn.com');
+    url.hostname.endsWith('basemaps.cartocdn.com') ||
+    url.hostname.endsWith('arcgisonline.com');
   if (!cacheable) return;
 
   // stale-while-revalidate：先回快取（若有），同時背景更新

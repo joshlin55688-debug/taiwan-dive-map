@@ -37,8 +37,14 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
   border:1px solid var(--line);border-radius:14px;padding:6px 14px;text-align:center;cursor:pointer}
 #explorePill b{font-size:20px;color:var(--accent);font-variant-numeric:tabular-nums}
 #explorePill span{display:block;font-size:9px;color:var(--sub);letter-spacing:1px}
-#menuBtn,#searchBtn{background:rgba(14,28,44,.88);border:1px solid var(--line);border-radius:14px;color:var(--text);
+#menuBtn,#searchBtn,#satBtn{background:rgba(14,28,44,.88);border:1px solid var(--line);border-radius:14px;color:var(--text);
   width:40px;height:40px;font-size:18px;cursor:pointer;flex:none}
+#satBtn{position:fixed;right:12px;top:calc(114px + var(--sat));z-index:1000;backdrop-filter:blur(8px)}
+#correctBar{position:fixed;left:12px;right:12px;top:calc(114px + var(--sat));z-index:1300;display:none;
+  align-items:center;gap:10px;background:rgba(13,32,40,.95);border:1px solid var(--warn);border-radius:14px;
+  padding:10px 14px;font-size:13px;font-weight:600;color:#fde68a;box-shadow:0 4px 24px rgba(0,0,0,.4)}
+#correctBar button{margin-left:auto;flex:none;background:#3d2f12;color:#fde68a;border:none;border-radius:9px;
+  padding:6px 12px;font-size:12px;font-weight:700;font-family:inherit;cursor:pointer}
 
 /* ── 模式切換（水肺/自潛）── */
 #modeSwitch{position:fixed;top:calc(66px + var(--sat));left:12px;z-index:1000;display:flex;gap:3px;
@@ -202,6 +208,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
   <button id="mBtnS" class="on" onclick="setMode('scuba')">🤿 水肺</button>
   <button id="mBtnF" onclick="setMode('free')">🐬 自潛</button>
 </div>
+<button id="satBtn" onclick="toggleSat()" title="衛星圖層">🛰️</button>
+<div id="correctBar">✥ 拖曳金色標記到正確位置，放開即儲存<button onclick="cancelCorrect()">取消</button></div>
 
 <div id="regionBar"></div>
 <div id="dim" onclick="closeAllSheets()"></div>
@@ -476,14 +484,14 @@ const LV = {1:['入門','b-lv1'],2:['進階','b-lv2'],3:['技潛','b-lv3']};
 /* ══════════ 資料層 ══════════ */
 const LS_KEY='tdm_v2';
 const MODES={scuba:{name:'水肺',icon:'🤿'},free:{name:'自潛',icon:'🐬'}};
-let store = {mode:'scuba', logs:{scuba:{},free:{}}, custom:[], wish:[], gear:{scuba:{},free:{}}};
+let store = {mode:'scuba', logs:{scuba:{},free:{}}, custom:[], wish:[], gear:{scuba:{},free:{}}, coords:{}};
 // logs[mode]: {siteId:[{id,date,buddy,tanks,depth,time,temp,vis,tags,note,photos:[ids]}]}
-// wish: [siteId]；gear[mode]: {siteId:{weight,suit,note}}
+// wish: [siteId]；gear[mode]: {siteId:{weight,suit,note}}；coords: {siteId:[lat,lng]} 手動校正的座標
 try{
   const raw=localStorage.getItem(LS_KEY);
   if(raw){ const o=JSON.parse(raw); store=Object.assign(store,o);
     store.logs=Object.assign({scuba:{},free:{}},store.logs||{});
-    store.wish=store.wish||[]; store.gear=Object.assign({scuba:{},free:{}},store.gear||{}); }
+    store.wish=store.wish||[]; store.gear=Object.assign({scuba:{},free:{}},store.gear||{}); store.coords=store.coords||{}; }
   else{ const v1=localStorage.getItem('tdm_v1');      // 從單模式版本遷移，舊紀錄視為水肺
     if(v1){ const o=JSON.parse(v1); store.logs.scuba=o.logs||{}; store.custom=o.custom||[]; persist(); } }
 }catch(e){}
@@ -507,7 +515,8 @@ async function photoGet(id){ const d=await idb(); return new Promise(res=>{ cons
 async function photoDel(id){ const d=await idb(); const tx=d.transaction('photos','readwrite'); tx.objectStore('photos').delete(id); }
 async function photoClear(){ const d=await idb(); return new Promise(res=>{ const tx=d.transaction('photos','readwrite'); tx.objectStore('photos').clear(); tx.oncomplete=res; tx.onerror=res; }); }
 
-function allSites(){ return SITES_RAW.concat(store.custom).map(s=>({id:s[0],name:s[1],region:s[2],lat:s[3],lng:s[4],lv:s[5],type:s[6],depth:s[7],feat:s[8],custom:s[9]==='c'})); }
+function allSites(){ return SITES_RAW.concat(store.custom).map(s=>{ const o=store.coords[s[0]];
+  return {id:s[0],name:s[1],region:s[2],lat:o?o[0]:s[3],lng:o?o[1]:s[4],lv:s[5],type:s[6],depth:s[7],feat:s[8],custom:s[9]==='c',fixed:!!o}; }); }
 function siteLogs(id){ return curLogs()[id]||[]; }
 function isOpen(id){ return siteLogs(id).length>0; }
 function isWish(id){ return store.wish.includes(id); }
@@ -521,8 +530,19 @@ function toggleWish(id){
 /* ══════════ 地圖 ══════════ */
 const map=L.map('map',{zoomControl:true,attributionControl:true,maxZoom:18,minZoom:7,
   maxBounds:[[20.4,117.8],[26.6,123.6]],maxBoundsViscosity:.8});
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
+const darkTiles=L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{
   attribution:'&copy; OpenStreetMap &copy; CARTO', subdomains:'abcd', maxZoom:19}).addTo(map);
+const satTiles=L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',{
+  attribution:'&copy; Esri World Imagery', maxZoom:19});
+let satellite=false;
+function toggleSat(){
+  satellite=!satellite;
+  if(satellite){ map.removeLayer(darkTiles); satTiles.addTo(map).bringToBack(); fogHidden=true; }
+  else { map.removeLayer(satTiles); darkTiles.addTo(map).bringToBack(); fogHidden=false; }
+  const b=$('satBtn'); b.textContent=satellite?'🗺️':'🛰️'; b.title=satellite?'切回迷霧地圖':'衛星圖層';
+  fog.redraw();
+  if(satellite) toast('🛰️ 衛星偵查模式：迷霧暫時退開，看得到礁石與入水點');
+}
 map.fitBounds([[21.6,119.2],[25.4,122.15]]);
 
 /* ── 迷霧層 ── */
@@ -537,6 +557,7 @@ const Fog=L.Layer.extend({
     this.redraw(); },
   redraw(){ const m=this._m, ctx=this._c.getContext('2d'), sz=m.getSize();
     ctx.clearRect(0,0,sz.x,sz.y);
+    if(fogHidden) return;                                 // 衛星偵查模式：不畫霧
     ctx.fillStyle='rgba(164,182,198,0.60)';               // 半透明霧白，看得到台灣輪廓
     ctx.fillRect(0,0,sz.x,sz.y);
     ctx.fillStyle='rgba(24,42,60,0.35)';                  // 疊一層深灰讓霧有層次
@@ -559,6 +580,7 @@ const Fog=L.Layer.extend({
     ctx.globalCompositeOperation='source-over'; }
 });
 const anim={site:null,f:0};
+let fogHidden=false;                                       // 衛星模式時暫時不畫迷霧
 const fogTex=(()=>{                                        // 預先產生一張雲霧噪點磚
   const c=document.createElement('canvas'); c.width=c.height=256; const x=c.getContext('2d');
   for(let i=0;i<300;i++){ const px=Math.random()*256, py=Math.random()*256, r=6+Math.random()*26;
@@ -678,8 +700,12 @@ async function openSite(id){
     </div>
     <div class="gearbox"><span class="gt">🎒</span><span class="gv">${gearTxt}</span>
       <button class="btn btn-ghost btn-sm" onclick="openGear()">編輯</button></div>
-    <button class="btn btn-main" onclick="openLogForm()">${open?'＋ 新增一筆潛水紀錄':'🌫 標記已潛，散開迷霧'}</button>`;
-  if(s.custom) html+=`<div style="margin-top:8px"><button class="btn btn-danger btn-sm" onclick="delCustom('${id}')">刪除這個自訂潛點</button></div>`;
+    <button class="btn btn-main" onclick="openLogForm()">${open?'＋ 新增一筆潛水紀錄':'🌫 標記已潛，散開迷霧'}</button>
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap">
+      <button class="btn btn-ghost btn-sm" onclick="beginCorrect('${id}')">✥ 校正位置</button>
+      ${s.fixed?`<button class="btn btn-ghost btn-sm" onclick="resetCoord('${id}')">↩ 還原內建位置</button>`:''}
+      ${s.custom?`<button class="btn btn-danger btn-sm" onclick="delCustom('${id}')">刪除自訂潛點</button>`:''}
+    </div>`;
   if(logs.length) html+=`<div style="margin-top:14px;font-size:13px;color:var(--sub);font-weight:700">潛水日誌（${logs.length}）</div>`;
   for(const lg of [...logs].reverse()) html+=await logCardHtml(lg);
   $('siteBody').innerHTML=html;
@@ -761,7 +787,7 @@ function delCustom(id){
   if(!confirm('確定刪除這個自訂潛點？其日誌（含水肺與自潛）也會一併刪除')) return;
   for(const m in store.logs){ (store.logs[m][id]||[]).forEach(lg=>(lg.photos||[]).forEach(photoDel)); delete store.logs[m][id]; }
   for(const m in store.gear) delete store.gear[m][id];
-  store.wish=store.wish.filter(x=>x!==id);
+  store.wish=store.wish.filter(x=>x!==id); delete store.coords[id];
   store.custom=store.custom.filter(s=>s[0]!==id);
   persist(); refreshAll(); closeAllSheets(); toast('已刪除');
 }
@@ -941,6 +967,29 @@ function gotoSite(id){
   setTimeout(()=>openSite(id),850);
 }
 
+/* ── 校正潛點座標（拖曳金色標記）── */
+let dragMk=null;
+function beginCorrect(id){
+  const s=allSites().find(x=>x.id===id); if(!s) return;
+  closeAllSheets();
+  map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),15),{duration:.6});
+  cancelCorrect();
+  setTimeout(()=>{
+    dragMk=L.marker([s.lat,s.lng],{draggable:true,zIndexOffset:2000,
+      icon:L.divIcon({html:'<div class="mk mk-locked wish" style="width:30px;height:30px;font-size:15px">✥</div>',className:'',iconSize:[30,30],iconAnchor:[15,15]})}).addTo(map);
+    dragMk.on('dragend',ev=>{ const ll=ev.target.getLatLng(); saveCoord(id,ll.lat,ll.lng); });
+    $('correctBar').style.display='flex';
+  },650);
+}
+function cancelCorrect(){ if(dragMk){ map.removeLayer(dragMk); dragMk=null; } $('correctBar').style.display='none'; }
+function saveCoord(id,lat,lng){
+  const s=allSites().find(x=>x.id===id);
+  if(s&&s.custom){ const c=store.custom.find(x=>x[0]===id); if(c){ c[3]=+lat.toFixed(5); c[4]=+lng.toFixed(5); } }
+  else store.coords[id]=[+lat.toFixed(5),+lng.toFixed(5)];
+  cancelCorrect(); persist(); refreshAll(); toast('已更新潛點位置 ✅'); openSite(id);
+}
+function resetCoord(id){ delete store.coords[id]; persist(); refreshAll(); toast('已還原內建位置'); openSite(id); }
+
 /* ── 裝備備忘 ── */
 function openGear(){
   const s=allSites().find(x=>x.id===curSite); if(!s) return;
@@ -1014,7 +1063,7 @@ async function exportData(){
     const blob=await photoGet(pid); if(!blob) continue;
     photos[pid]=await new Promise(r=>{ const fr=new FileReader(); fr.onload=()=>r(fr.result); fr.readAsDataURL(blob); });
   }
-  const payload={app:'taiwan-dive-map',ver:3,exportedAt:new Date().toISOString(),logs:store.logs,custom:store.custom,wish:store.wish,gear:store.gear,photos};
+  const payload={app:'taiwan-dive-map',ver:4,exportedAt:new Date().toISOString(),logs:store.logs,custom:store.custom,wish:store.wish,gear:store.gear,coords:store.coords,photos};
   const blob=new Blob([JSON.stringify(payload)],{type:'application/json'});
   const a=document.createElement('a'); a.href=URL.createObjectURL(blob);
   a.download='dive-map-backup-'+new Date().toISOString().slice(0,10).replace(/-/g,'')+'.json';
@@ -1029,7 +1078,7 @@ $('importFile').addEventListener('change',async e=>{
     store.logs = data.ver>=2 ? Object.assign({scuba:{},free:{}},data.logs||{})
                              : {scuba:data.logs||{}, free:{}};   // 舊版備份視為水肺
     store.custom=data.custom||[];
-    store.wish=data.wish||[]; store.gear=Object.assign({scuba:{},free:{}},data.gear||{});
+    store.wish=data.wish||[]; store.gear=Object.assign({scuba:{},free:{}},data.gear||{}); store.coords=data.coords||{};
     await photoClear();                                          // 清掉舊照片避免孤兒檔累積
     for(const pid in (data.photos||{})){
       const res=await fetch(data.photos[pid]); await photoPut(pid,await res.blob());
@@ -1168,7 +1217,7 @@ async function resetAll(){
   if(!confirm('確定清除全部潛水紀錄、照片與自訂潛點？此動作無法復原！')) return;
   if(!confirm('真的確定嗎？建議先「匯出備份」再清除。')) return;
   await photoClear();
-  store={mode:store.mode,logs:{scuba:{},free:{}},custom:[],wish:[],gear:{scuba:{},free:{}}};
+  store={mode:store.mode,logs:{scuba:{},free:{}},custom:[],wish:[],gear:{scuba:{},free:{}},coords:{}};
   persist(); refreshAll(); closeAllSheets(); toast('已重置');
 }
 
