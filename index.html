@@ -118,6 +118,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 .tg{background:#16283c;border:1px solid var(--line);color:var(--sub);border-radius:20px;
   padding:6px 12px;font-size:13px;cursor:pointer;user-select:none}
 .tg.on{background:#0f4a3e;border-color:var(--accent);color:#7af0dd}
+.chiprow{display:flex;gap:7px;overflow-x:auto;padding-bottom:2px;margin-top:8px;scrollbar-width:none}
+.chiprow::-webkit-scrollbar{display:none}
+.chiprow .tg{flex:none}
+.locpulse{width:26px;height:26px;border-radius:50%;background:rgba(45,212,191,.35);
+  border:2px solid #2dd4bf;animation:locpulse 1.2s ease-out infinite;box-shadow:0 0 12px rgba(45,212,191,.7)}
+@keyframes locpulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(2.6);opacity:0}}
 #photoPrev{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 #photoPrev .pp{position:relative}
 #photoPrev img{width:64px;height:64px;object-fit:cover;border-radius:10px}
@@ -275,10 +281,11 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 <div class="sheet" id="searchSheet">
   <div class="grab"></div>
   <div class="body">
-    <h2>🔍 搜尋潛點</h2>
+    <h2>🔍 潛點清單</h2>
     <div class="fld" style="margin-top:10px">
       <input type="search" id="searchInput" placeholder="輸入潛點名稱（中英文皆可）" oninput="renderSearch()">
     </div>
+    <div class="chiprow" id="regionChips"></div>
     <div class="tagwrap" id="filterChips" style="margin-top:8px">
       <span class="tg on" data-f="all" onclick="setFilter('all')">全部</span>
       <span class="tg" data-f="open" onclick="setFilter('open')">已解鎖</span>
@@ -831,16 +838,28 @@ function openStats(){
 }
 function openMenu(){ openSheetEl('menuSheet'); }
 
-/* ── 搜尋潛點 ── */
-let searchFilter='all';
+/* ── 潛點清單／搜尋 ── */
+let searchFilter='all', searchRegion='all';
 function setFilter(f){ searchFilter=f;
   document.querySelectorAll('#filterChips .tg').forEach(t=>t.classList.toggle('on',t.dataset.f===f));
   renderSearch(); }
-function openSearch(){ $('searchInput').value=''; renderSearch(); openSheetEl('searchSheet'); }
+function buildRegionChips(){
+  let html=`<span class="tg${searchRegion==='all'?' on':''}" data-r="all" onclick="setRegionFilter('all')">全部</span>`;
+  for(const rk in REGIONS){ const c=allSites().filter(s=>s.region===rk).length;
+    html+=`<span class="tg${searchRegion===rk?' on':''}" data-r="${rk}" onclick="setRegionFilter('${rk}')">${REGIONS[rk].name}（${c}）</span>`; }
+  $('regionChips').innerHTML=html;
+}
+function setRegionFilter(rk){ searchRegion=rk;
+  document.querySelectorAll('#regionChips .tg').forEach(t=>t.classList.toggle('on',t.dataset.r===rk));
+  if(rk!=='all') map.flyTo(REGIONS[rk].center,REGIONS[rk].zoom,{duration:.7});   // 背景地圖同步移到該區
+  renderSearch();
+}
+function openSearch(){ $('searchInput').value=''; searchRegion='all'; buildRegionChips(); renderSearch(); openSheetEl('searchSheet'); }
 function renderSearch(){
   const q=normName($('searchInput').value);
   let list=allSites();
   if(q) list=list.filter(s=>normName(s.name).includes(q)||(SITE_ALIASES[s.id]||[]).some(a=>normName(a).includes(q)));
+  if(searchRegion!=='all') list=list.filter(s=>s.region===searchRegion);
   if(searchFilter==='open') list=list.filter(s=>isOpen(s.id));
   else if(searchFilter==='locked') list=list.filter(s=>!isOpen(s.id));
   else if(searchFilter==='wish') list=list.filter(s=>isWish(s.id));
@@ -848,12 +867,12 @@ function renderSearch(){
   for(const rk in REGIONS){
     const rows=list.filter(s=>s.region===rk); if(!rows.length) continue;
     const opened=rows.filter(s=>isOpen(s.id)).length;
-    html+=`<div class="sgroup">${REGIONS[rk].name}（${opened}/${rows.length}）</div>`;
+    html+=`<div class="sgroup">${REGIONS[rk].name}（已解鎖 ${opened}/${rows.length}）</div>`;
     for(const s of rows){ const open=isOpen(s.id);
       html+=`<div class="srow" onclick="gotoSite('${s.id}')">
         <span class="ic">${open?MODES[store.mode].icon:(isWish(s.id)?'⭐':'🌫')}</span>
         <span><div class="nm">${s.name}${searchFilter==='wish'?`<span class="wke" data-sid="${s.id}"></span>`:''}</div>
-          <div class="rg">${s.type}${s.depth?`・最深 ${s.depth}m`:''}${open?`・潛次 ${siteLogs(s.id).length}`:''}</div></span>
+          <div class="rg">${s.type}${s.depth?`・最深 ${s.depth}m`:''}${open?`・潛次 ${siteLogs(s.id).length}`:''}・📍 點我定位</div></span>
         <span class="badge ${LV[s.lv][1]} lvb">${LV[s.lv][0]}</span></div>`; }
   }
   $('searchList').innerHTML=html||`<div class="hint" style="margin-top:14px">${searchFilter==='wish'?'還沒有想去的潛點——打開潛點按 ☆ 加入願望清單':'找不到符合的潛點——可以長按地圖任一位置新增自訂潛點'}</div>`;
@@ -872,10 +891,21 @@ async function fillWeekendLights(){        // 願望清單顯示本週末海況�
     }catch(e){}
   }
 }
+let locMarker=null;
+function highlightSite(s){                    // 定位時的脈動光圈，讓你一眼確認方位
+  if(locMarker) map.removeLayer(locMarker);
+  locMarker=L.marker([s.lat,s.lng],{interactive:false,zIndexOffset:1000,
+    icon:L.divIcon({html:'<div class="locpulse"></div>',className:'',iconSize:[26,26],iconAnchor:[13,13]})}).addTo(map);
+  clearTimeout(highlightSite._t);
+  highlightSite._t=setTimeout(()=>{ if(locMarker){map.removeLayer(locMarker);locMarker=null;} },4500);
+}
 function gotoSite(id){
   const s=allSites().find(x=>x.id===id); if(!s) return;
   closeAllSheets();
-  map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),13),{duration:.8});
+  const tz=Math.max(map.getZoom(),13);
+  const pt=map.project([s.lat,s.lng],tz); pt.y+=map.getSize().y*0.17;   // 中心南移，讓潛點浮在面板上方看得到
+  map.flyTo(map.unproject(pt,tz),tz,{duration:.8});
+  highlightSite(s);
   setTimeout(()=>openSite(id),850);
 }
 
