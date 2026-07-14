@@ -21,6 +21,15 @@
   --sab:env(safe-area-inset-bottom,0px); --sat:env(safe-area-inset-top,0px);
 }
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+#splash{position:fixed;inset:0;z-index:5000;background:radial-gradient(circle at 50% 38%,#123a52,#0a1420);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;transition:opacity .5s}
+#splash.hide{opacity:0;pointer-events:none}
+#splash img{width:118px;height:118px;border-radius:27px;box-shadow:0 8px 40px rgba(0,0,0,.55)}
+#splash .st{font-size:21px;font-weight:800;color:#e8f1f8;letter-spacing:1px}
+#splash .ss{font-size:13px;color:#8fa8bd;margin-top:-6px}
+#splash .sl{width:40px;height:40px;border:3px solid #21384f;border-top-color:#2dd4bf;border-radius:50%;
+  animation:spin 1s linear infinite;margin-top:10px}
+@keyframes spin{to{transform:rotate(360deg)}}
 html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","Noto Sans TC",sans-serif;background:var(--bg);color:var(--text)}
 #map{position:fixed;inset:0;background:#0a1420}
 .leaflet-container{background:#0a1420;font-family:inherit}
@@ -195,6 +204,12 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 </style>
 </head>
 <body>
+<div id="splash">
+  <img src="icon-192.png" alt="">
+  <div class="st">台灣潛點迷霧地圖</div>
+  <div class="ss">點亮你潛過的海</div>
+  <div class="sl"></div>
+</div>
 <div id="map"></div>
 
 <div id="topbar">
@@ -271,6 +286,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
   <div class="body">
     <h2>⚙️ 選單</h2>
     <div class="menu-list">
+      <button class="btn btn-main" id="installBtn" onclick="installApp()" style="display:none">📲 安裝 App 到主畫面</button>
       <button class="btn btn-ghost" onclick="shareImage()">📸 產生探索分享圖</button>
       <button class="btn btn-ghost" onclick="exportData()">📤 匯出備份（JSON）</button>
       <button class="btn btn-ghost" onclick="document.getElementById('importFile').click()">📥 匯入備份</button>
@@ -280,6 +296,8 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
       <button class="btn btn-danger" onclick="resetAll()">🗑 清除全部資料</button>
     </div>
     <div class="hint">
+      <span id="installHint">・📲 <b>裝成 App</b>：Android Chrome 選單→「安裝應用程式」；iPhone Safari 按
+      <b>分享 → 加入主畫面</b>，就會多一個全螢幕、可離線的 🐬 潛水迷霧圖示<br></span>
       ・內建全台 <b id="siteTotal"></b> 個潛點（東北角/北海岸、墾丁、小琉球、綠島、蘭嶼、澎湖、東海岸）<br>
       ・水肺 🤿 與自潛 🐬 各有獨立的迷霧與日誌，左上角隨時切換<br>
       ・找不到的潛點：<b>長按地圖</b>任一位置即可自行新增<br>
@@ -1232,6 +1250,26 @@ if(!Object.keys(store.logs.scuba).length && !Object.keys(store.logs.free).length
 /* ── PWA：註冊 Service Worker，讓 App 離線也能開（快取本體＋地圖）── */
 if('serviceWorker' in navigator)
   window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
+
+/* ── 安裝成 App：Android/Chrome 會給原生安裝框；iOS 走選單指引 ── */
+let deferredPrompt=null;
+function isStandalone(){ return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone===true; }
+window.addEventListener('beforeinstallprompt',e=>{ e.preventDefault(); deferredPrompt=e;
+  const b=$('installBtn'); if(b) b.style.display=''; });
+window.addEventListener('appinstalled',()=>{ deferredPrompt=null;
+  const b=$('installBtn'); if(b) b.style.display='none'; toast('已安裝為 App 🎉'); });
+async function installApp(){
+  if(!deferredPrompt){ toast('請用瀏覽器選單的「安裝／加入主畫面」'); return; }
+  deferredPrompt.prompt();
+  try{ await deferredPrompt.userChoice; }catch(e){}
+  deferredPrompt=null; $('installBtn').style.display='none';
+}
+if(isStandalone()){ const h=$('installHint'); if(h) h.innerHTML='・✓ <b>已安裝為 App</b>，資料只存在這台裝置，換手機前記得先匯出備份<br>'; }
+
+/* ── 啟動畫面：載入完成後淡出 ── */
+window.addEventListener('load',()=>setTimeout(()=>{
+  const s=$('splash'); if(s){ s.classList.add('hide'); setTimeout(()=>s.remove(),600); }
+},700));
 </script>
 </body>
 </html>
