@@ -8,8 +8,11 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="潛水迷霧">
+<link rel="apple-touch-icon" href="icon-192.png">
 <title>台灣潛點迷霧地圖</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css">
+<link rel="manifest" href="manifest.json">
 <style>
 :root{
   --bg:#0b1622; --panel:#122234; --panel2:#0e1c2c;
@@ -124,6 +127,9 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 .locpulse{width:26px;height:26px;border-radius:50%;background:rgba(45,212,191,.35);
   border:2px solid #2dd4bf;animation:locpulse 1.2s ease-out infinite;box-shadow:0 0 12px rgba(45,212,191,.7)}
 @keyframes locpulse{0%{transform:scale(.55);opacity:1}100%{transform:scale(2.6);opacity:0}}
+.cluster{width:36px;height:36px;border-radius:50%;display:flex;align-items:center;justify-content:center;
+  font-weight:700;font-size:13px;color:#04263a;background:radial-gradient(circle at 35% 35%,#7dd3fc,#0891b2);
+  border:2px solid #cffafe;box-shadow:0 0 10px rgba(56,189,248,.55)}
 #photoPrev{display:flex;gap:6px;flex-wrap:wrap;margin-top:8px}
 #photoPrev .pp{position:relative}
 #photoPrev img{width:64px;height:64px;object-fit:cover;border-radius:10px}
@@ -323,6 +329,7 @@ html,body{height:100%;overflow:hidden;font-family:-apple-system,"PingFang TC","N
 <div id="lightbox" onclick="this.classList.remove('show')"><img id="lbImg"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
 <script>
 /* ══════════ 潛點資料庫（網路彙整全台 110+ 潛點）══════════
    欄位：[id, 名稱, 區域, 緯度, 經度, 難度(1入門/2進階/3技潛), 類型, 最大深度m, 特色] */
@@ -568,8 +575,14 @@ function revealAnim(siteId){ anim.site=siteId; const t0=performance.now();
 /* ── 標記與區域進度環 ── */
 let markers={}, rings=[];
 const RING_MAX_ZOOM=9;   // <=9 顯示區域進度環，>=10 顯示潛點
+// 密集潛點（如龍洞）放大才散開，用聚合群組去除重疊；套件載入失敗時退回一般圖層
+const clusterGroup = (typeof L.markerClusterGroup==='function')
+  ? L.markerClusterGroup({maxClusterRadius:44,showCoverageOnHover:false,spiderfyOnMaxZoom:true,
+      disableClusteringAtZoom:14,chunkedLoading:true,
+      iconCreateFunction:c=>L.divIcon({html:`<div class="cluster">${c.getChildCount()}</div>`,className:'',iconSize:[36,36]})})
+  : L.layerGroup();
 function buildMarkers(){
-  Object.values(markers).forEach(mk=>map.removeLayer(mk)); markers={};
+  clusterGroup.clearLayers(); markers={};
   for(const s of allSites()){
     const open=isOpen(s.id), n=siteLogs(s.id).length;
     const html=open
@@ -578,7 +591,7 @@ function buildMarkers(){
     const mk=L.marker([s.lat,s.lng],{icon:L.divIcon({html,className:'',iconSize:open?[26,26]:[22,22],iconAnchor:open?[13,13]:[11,11]})});
     if(open) mk.bindTooltip(s.name,{direction:'top',offset:[0,-12],className:'site-tip'});
     mk.on('click',()=>openSite(s.id));
-    markers[s.id]=mk;
+    markers[s.id]=mk; clusterGroup.addLayer(mk);
   }
   buildRings(); syncZoomLayers();
 }
@@ -605,8 +618,8 @@ function buildRings(){
 }
 function syncZoomLayers(){
   const z=map.getZoom();
-  if(z<=RING_MAX_ZOOM){ rings.forEach(r=>r.addTo(map)); Object.values(markers).forEach(m=>map.removeLayer(m)); }
-  else { rings.forEach(r=>map.removeLayer(r)); Object.values(markers).forEach(m=>m.addTo(map)); }
+  if(z<=RING_MAX_ZOOM){ rings.forEach(r=>r.addTo(map)); if(map.hasLayer(clusterGroup)) map.removeLayer(clusterGroup); }
+  else { rings.forEach(r=>map.removeLayer(r)); if(!map.hasLayer(clusterGroup)) clusterGroup.addTo(map); }
 }
 map.on('zoomend',syncZoomLayers);
 
@@ -728,7 +741,8 @@ async function logCardHtml(lg){
   return `<div class="logcard">
     <div class="lc-top"><span class="lc-date">${lg.date||'—'}</span>
       ${lg.buddy?`<span class="lc-sub">${lg.buddy}</span>`:''}
-      <button class="lc-del" onclick="delLog('${lg.id}')">刪除</button></div>
+      <button class="lc-del" onclick="editLog('${lg.id}')" style="color:var(--accent2)">編輯</button>
+      <button class="lc-del" onclick="delLog('${lg.id}')" style="margin-left:0">刪除</button></div>
     ${stats?`<div class="lc-stats">${stats}</div>`:''}
     ${tags?`<div class="lc-tags">${tags}</div>`:''}
     ${lg.note?`<div class="lc-note">${lg.note.replace(/</g,'&lt;')}</div>`:''}
@@ -760,31 +774,41 @@ async function delLog(logId){
   persist(); refreshAll(); openSite(curSite);
 }
 
-/* ── 日誌表單 ── */
-let pendingPhotos=[];
-function openLogForm(){
-  $('f_date').value=new Date().toISOString().slice(0,10);
-  ['f_buddy','f_tanks','f_depth','f_time','f_temp','f_vis','f_note'].forEach(i=>$(i).value='');
+/* ── 日誌表單（新增／編輯）── */
+let pendingPhotos=[], editingLogId=null, keptPids=[];
+function editLog(logId){ const lg=(curLogs()[curSite]||[]).find(l=>l.id===logId); if(lg) openLogForm(lg); }
+async function openLogForm(edit){
+  editingLogId = edit ? edit.id : null;
+  keptPids = edit ? [...(edit.photos||[])] : [];
   pendingPhotos=[]; $('photoPrev').innerHTML='';
+  $('f_date').value = (edit&&edit.date) || new Date().toISOString().slice(0,10);
+  $('f_buddy').value=edit?.buddy||''; $('f_tanks').value=edit?.tanks||'';
+  $('f_depth').value=edit?.depth||''; $('f_time').value=edit?.time||'';
+  $('f_temp').value=edit?.temp||''; $('f_vis').value=edit?.vis||''; $('f_note').value=edit?.note||'';
   const tw=$('tagWrap'); tw.innerHTML='';
-  BIO_TAGS.forEach(t=>{ const el=document.createElement('span'); el.className='tg'; el.textContent=t;
+  const sel=new Set(edit?.tags||[]);
+  BIO_TAGS.forEach(t=>{ const el=document.createElement('span'); el.className='tg'+(sel.has(t)?' on':''); el.textContent=t;
     el.onclick=()=>el.classList.toggle('on'); tw.appendChild(el); });
   const s=allSites().find(x=>x.id===curSite);
   const free=store.mode==='free';
   $('l_tanks').textContent=free?'下潛趟數':'氣瓶支數';
   $('l_time').textContent=free?'最長一趟 (秒)':'潛水時間 (分)';
-  $('logTitle').textContent=MODES[store.mode].icon+' '+(isOpen(curSite)?'新增紀錄：':'首潛解鎖：')+s.name;
+  $('logTitle').textContent=MODES[store.mode].icon+' '+(edit?'編輯紀錄：':isOpen(curSite)?'新增紀錄：':'首潛解鎖：')+s.name;
   openSheetEl('logSheet');
+  for(const pid of keptPids){ const blob=await photoGet(pid); if(blob) addPhotoPrev({pid,url:URL.createObjectURL(blob)}); }
+}
+function addPhotoPrev(item){   // item={url, pid?, blob?}
+  const d=document.createElement('div'); d.className='pp';
+  d.innerHTML=`<img src="${item.url}"><button class="px">✕</button>`;
+  d.querySelector('.px').onclick=()=>{ d.remove();
+    if(item.pid) keptPids=keptPids.filter(p=>p!==item.pid);
+    if(item.blob) pendingPhotos=pendingPhotos.filter(p=>p.url!==item.url); };
+  $('photoPrev').appendChild(d);
 }
 $('f_photos').addEventListener('change',async e=>{
   for(const file of e.target.files){
-    const blob=await compressImage(file);
-    const url=URL.createObjectURL(blob);
-    pendingPhotos.push({blob,url});
-    const d=document.createElement('div'); d.className='pp';
-    d.innerHTML=`<img src="${url}"><button class="px">✕</button>`;
-    d.querySelector('.px').onclick=()=>{ pendingPhotos=pendingPhotos.filter(p=>p.url!==url); d.remove(); };
-    $('photoPrev').appendChild(d);
+    const blob=await compressImage(file); const url=URL.createObjectURL(blob);
+    pendingPhotos.push({blob,url}); addPhotoPrev({blob,url});
   }
   e.target.value='';
 });
@@ -798,15 +822,23 @@ function compressImage(file){ return new Promise(res=>{
 async function saveLog(){
   const btn=$('saveLogBtn'); btn.disabled=true; btn.textContent='儲存中…';
   try{
-    const firstTime=!isOpen(curSite);
+    const fields={date:$('f_date').value,buddy:$('f_buddy').value.trim(),tanks:$('f_tanks').value,
+      depth:$('f_depth').value,time:$('f_time').value,temp:$('f_temp').value,vis:$('f_vis').value,
+      tags:[...document.querySelectorAll('#tagWrap .tg.on')].map(e=>e.textContent),note:$('f_note').value.trim()};
+    if(editingLogId){                                  // ── 編輯既有紀錄 ──
+      const lg=(curLogs()[curSite]||[]).find(l=>l.id===editingLogId);
+      const newIds=[];
+      for(let i=0;i<pendingPhotos.length;i++){ const pid=editingLogId+'_e'+Date.now()+i; await photoPut(pid,pendingPhotos[i].blob); newIds.push(pid); }
+      (lg.photos||[]).filter(p=>!keptPids.includes(p)).forEach(photoDel);   // 刪掉被移除的舊照片
+      Object.assign(lg,fields,{photos:[...keptPids,...newIds]});
+      persist(); closeSheet('logSheet'); refreshAll(); openSite(curSite); toast('已更新紀錄');
+      return;
+    }
+    const firstTime=!isOpen(curSite);                  // ── 新增紀錄 ──
     const id='l'+Date.now()+Math.random().toString(36).slice(2,6);
     const photoIds=[];
     for(let i=0;i<pendingPhotos.length;i++){ const pid=id+'_p'+i; await photoPut(pid,pendingPhotos[i].blob); photoIds.push(pid); }
-    const tags=[...document.querySelectorAll('#tagWrap .tg.on')].map(e=>e.textContent);
-    const lg={id,date:$('f_date').value,buddy:$('f_buddy').value.trim(),tanks:$('f_tanks').value,
-      depth:$('f_depth').value,time:$('f_time').value,temp:$('f_temp').value,vis:$('f_vis').value,
-      tags,note:$('f_note').value.trim(),photos:photoIds};
-    (curLogs()[curSite]=curLogs()[curSite]||[]).push(lg);
+    (curLogs()[curSite]=curLogs()[curSite]||[]).push({id,...fields,photos:photoIds});
     persist(); closeSheet('logSheet'); refreshAll();
     if(firstTime){ const s=allSites().find(x=>x.id===curSite);
       map.flyTo([s.lat,s.lng],Math.max(map.getZoom(),12),{duration:.7});
@@ -1147,6 +1179,10 @@ $('subTitle').textContent=MODES[store.mode].icon+' '+MODES[store.mode].name+'模
 refreshAll();
 if(!Object.keys(store.logs.scuba).length && !Object.keys(store.logs.free).length)
   setTimeout(()=>toast('🌫 全台被海霧覆蓋中——點一個潛點開始探索！'),1200);
+
+/* ── PWA：註冊 Service Worker，讓 App 離線也能開（快取本體＋地圖）── */
+if('serviceWorker' in navigator)
+  window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}));
 </script>
 </body>
 </html>
